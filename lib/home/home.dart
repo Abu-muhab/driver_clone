@@ -3,13 +3,16 @@ import 'package:driver_clone/models/auth_model.dart';
 import 'package:driver_clone/models/location_model.dart';
 import 'package:driver_clone/models/trip_model.dart';
 import 'package:driver_clone/widgets/NavCenterButton.dart';
+import 'package:driver_clone/widgets/nav_button.dart';
 import 'package:driver_clone/widgets/online_toggle_button.dart';
+import 'package:driver_clone/widgets/overview.dart';
 import 'package:driver_clone/widgets/request_card.dart';
 import 'package:driver_clone/widgets/rider_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tindercard/flutter_tindercard.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:location/location.dart';
 import 'package:provider/provider.dart';
 
 class HomePage extends StatefulWidget {
@@ -21,6 +24,20 @@ class _HomePageState extends State<HomePage> {
   GoogleMapController mapController;
   CardController swipeController;
   String mapStyle;
+  LocationData locationData;
+  bool showIndicator = true;
+  GlobalKey<RiderInfoState> infoKey = new GlobalKey();
+
+  static const platform = const MethodChannel('myPluginsChannel');
+
+  Future<void> launchMap(LatLng location) async {
+    try {
+      await platform.invokeMapMethod("launchMap",
+          {"latitude": location.latitude, "longitude": location.longitude});
+    } catch (err) {
+      print(err);
+    }
+  }
 
   void getMapStyle() async {
     String style = await rootBundle.loadString("assets/grey_detailed.json");
@@ -36,7 +53,20 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     getMapStyle();
+    setLocation();
     super.initState();
+  }
+
+  void setLocation() async {
+    LocationData data;
+    while (data == null) {
+      data = await Provider.of<LocationModel>(context, listen: false)
+          .location
+          .getLocation();
+      setState(() {
+        locationData = data;
+      });
+    }
   }
 
   @override
@@ -117,111 +147,156 @@ class _HomePageState extends State<HomePage> {
       body: Column(
         children: <Widget>[
           Expanded(
-            child: Consumer<LocationModel>(
-              builder: (context, locationModel, _) {
-                if (locationModel.currentLocation == null) {
-                  return Container();
-                }
+            child: Consumer<TripModel>(
+              child: Consumer<LocationModel>(
+                builder: (context, locationModel, _) {
+                  if (locationModel.currentLocation == null) {
+                    return Container();
+                  }
 
-                return Stack(
-                  children: <Widget>[
-                    mapStyle == null
-                        ? Container()
-                        : GoogleMap(
-                            onMapCreated: (controller) {
-                              mapController = controller;
-                              mapController.setMapStyle(mapStyle);
+                  return Stack(
+                    children: <Widget>[
+                      mapStyle == null
+                          ? Container()
+                          : GoogleMap(
+                              onMapCreated: (controller) {
+                                mapController = controller;
+                                mapController.setMapStyle(mapStyle);
+                              },
+                              initialCameraPosition: CameraPosition(
+                                  target: LatLng(
+                                      locationModel.currentLocation.latitude,
+                                      locationModel.currentLocation.longitude),
+                                  zoom: 12.5),
+                              myLocationEnabled: true,
+                              zoomControlsEnabled: false,
+                              mapToolbarEnabled: false,
+                              myLocationButtonEnabled: false,
+                            ),
+                      Align(
+                        alignment: Provider.of<TripModel>(context, listen: true)
+                                    .requests
+                                    .length ==
+                                0
+                            ? Alignment.bottomRight
+                            : Alignment.topRight,
+                        child: Padding(
+                          padding: EdgeInsets.all(15),
+                          child: NavCenterButton(
+                            onTap: () {
+                              mapController.animateCamera(
+                                  CameraUpdate.newCameraPosition(CameraPosition(
+                                      target: LatLng(
+                                          locationModel
+                                              .currentLocation.latitude,
+                                          locationModel
+                                              .currentLocation.longitude),
+                                      zoom: 17)));
                             },
-                            initialCameraPosition: CameraPosition(
-                                target: LatLng(
-                                    locationModel.currentLocation.latitude,
-                                    locationModel.currentLocation.longitude),
-                                zoom: 12.5),
-                            myLocationEnabled: true,
-                            zoomControlsEnabled: false,
-                            mapToolbarEnabled: false,
-                            myLocationButtonEnabled: false,
                           ),
-                    Align(
-                      alignment: Provider.of<TripModel>(context, listen: true)
-                                  .requests
-                                  .length ==
-                              0
-                          ? Alignment.bottomRight
-                          : Alignment.topRight,
-                      child: Padding(
-                        padding: EdgeInsets.all(15),
-                        child: NavCenterButton(
-                          onTap: () {
-                            mapController.animateCamera(
-                                CameraUpdate.newCameraPosition(CameraPosition(
-                                    target: LatLng(
-                                        locationModel.currentLocation.latitude,
-                                        locationModel
-                                            .currentLocation.longitude),
-                                    zoom: 17)));
-                          },
                         ),
                       ),
-                    ),
-                    Align(
-                      alignment: Alignment.bottomRight,
-                      child: Padding(
-                          padding: EdgeInsets.all(1),
-                          child: Consumer<TripModel>(
-                            builder: (context, tripModel, _) {
-                              if (tripModel.requests.length == 0) {
-                                return Container(height: 0, width: 0);
-                              }
+                      Align(
+                        alignment: Alignment.bottomRight,
+                        child: Padding(
+                            padding: EdgeInsets.all(1),
+                            child: Consumer<TripModel>(
+                              builder: (context, tripModel, _) {
+                                if (tripModel.requests.length == 0) {
+                                  return Container(height: 0, width: 0);
+                                }
 
-                              if (tripModel.currentTrip != null) {
-                                return Consumer<TripModel>(
-                                  builder: (context, tripModel, _) {
-                                    return RiderInfo(
-                                      trip: tripModel.currentTrip,
-                                    );
-                                  },
+                                return Container(
+                                  height:
+                                      MediaQuery.of(context).size.height * 0.5,
+                                  child: TinderSwapCard(
+                                      swipeUp: false,
+                                      swipeDown: false,
+                                      cardController: swipeController,
+                                      allowVerticalMovement: false,
+                                      orientation: AmassOrientation.BOTTOM,
+                                      maxWidth:
+                                          MediaQuery.of(context).size.width *
+                                              0.9,
+                                      maxHeight:
+                                          MediaQuery.of(context).size.width *
+                                              0.65,
+                                      minWidth:
+                                          MediaQuery.of(context).size.width *
+                                              0.8,
+                                      minHeight:
+                                          MediaQuery.of(context).size.width *
+                                              0.55,
+                                      cardBuilder: (context, index) {
+                                        return TripCard(
+                                          trip: tripModel.requests[index],
+                                        );
+                                      },
+                                      stackNum: 3,
+                                      swipeCompleteCallback:
+                                          (orientation, index) {
+                                        if (orientation ==
+                                                CardSwipeOrientation.LEFT ||
+                                            orientation ==
+                                                CardSwipeOrientation.RIGHT) {
+                                          print("swiped");
+                                          tripModel.removeRequest(index);
+                                        }
+                                      },
+                                      totalNum: tripModel.requests.length),
                                 );
-                              }
-                              return Container(
-                                height:
-                                    MediaQuery.of(context).size.height * 0.5,
-                                child: TinderSwapCard(
-                                    swipeUp: false,
-                                    swipeDown: false,
-                                    cardController: swipeController,
-                                    allowVerticalMovement: false,
-                                    orientation: AmassOrientation.BOTTOM,
-                                    maxWidth:
-                                        MediaQuery.of(context).size.width * 0.9,
-                                    maxHeight:
-                                        MediaQuery.of(context).size.width *
-                                            0.65,
-                                    minWidth:
-                                        MediaQuery.of(context).size.width * 0.8,
-                                    minHeight:
-                                        MediaQuery.of(context).size.width *
-                                            0.55,
-                                    cardBuilder: (context, index) {
-                                      return TripCard(
-                                        trip: tripModel.requests[index],
-                                      );
-                                    },
-                                    stackNum: 3,
-                                    swipeCompleteCallback:
-                                        (orientation, index) {
-                                      if (orientation ==
-                                              CardSwipeOrientation.LEFT ||
-                                          orientation ==
-                                              CardSwipeOrientation.RIGHT) {
-                                        print("swiped");
-                                        tripModel.removeRequest(index);
-                                      }
-                                    },
-                                    totalNum: tripModel.requests.length),
-                              );
-                            },
-                          )),
+                              },
+                            )),
+                      )
+                    ],
+                  );
+                },
+              ),
+              builder: (context, tripModel, child) {
+                if (tripModel.currentTrip == null) {
+                  return child;
+                }
+                return Column(
+                  children: <Widget>[
+                    Expanded(
+                      child: Stack(
+                        children: <Widget>[
+                          locationData != null
+                              ? DistanceOverview(
+                                  firstLocation: LatLng(locationData.latitude,
+                                      locationData.longitude),
+                                  secondLocation:
+                                      tripModel.currentTrip.riderPickupCoords,
+                                  onPolylineDrawn: () {
+                                    infoKey.currentState.setState(() {
+                                      infoKey.currentState
+                                          .showOverviewLoadingIndicator = false;
+                                    });
+                                  },
+                                )
+                              : Container(
+                                  color: Colors.green,
+                                ),
+                          Align(
+                            alignment: Alignment.bottomRight,
+                            child: Padding(
+                              padding: EdgeInsets.all(15),
+                              child: NavButton(
+                                onTap: () {
+                                  if (locationData != null) {
+                                    launchMap(tripModel
+                                        .currentTrip.riderPickupCoords);
+                                  }
+                                },
+                              ),
+                            ),
+                          )
+                        ],
+                      ),
+                    ),
+                    RiderInfo(
+                      key: infoKey,
+                      trip: tripModel.currentTrip,
                     )
                   ],
                 );
